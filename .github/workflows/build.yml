@@ -114,7 +114,6 @@ jobs:
           cat << 'EOF' > app/src/main/java/com/custom/privatespace/vector/PrivateSpaceVectorEngine.java
           package com.custom.privatespace.vector;
           import android.content.Context;
-          import android.hardware.biometrics.BiometricAuthenticator;
           import android.provider.Settings;
           import android.os.Handler;
           import android.os.Looper;
@@ -186,13 +185,15 @@ jobs:
 
               private void hookBiometricAuthentication(ClassLoader cl) {
                   try {
-                      Class<?> authClientClass = XposedHelpers.findClass("com.android.server.biometrics.sensors.AuthenticationClient", cl);
+                      Class<?> authClientClass = XposedHelpers.findClass(
+                          "com.android.server.biometrics.sensors.AuthenticationClient", cl);
                       XposedBridge.hookAllMethods(authClientClass, "onAuthenticated", new XC_MethodHook() {
                           @Override protected void afterHookedMethod(MethodHookParam param) {
                               boolean authenticated = (boolean) param.args[1];
                               if (!authenticated || param.args[0] == null) return;
-                              BiometricAuthenticator.Identifier id = (BiometricAuthenticator.Identifier) param.args[0];
-                              if (id.getBiometricId() == getSecretFingerId()) switchToPrivateSpace();
+                              Object id = param.args[0]; // avoid hidden type entirely via reflection
+                              int biometricId = (int) XposedHelpers.callMethod(id, "getBiometricId");
+                              if (biometricId == getSecretFingerId()) switchToPrivateSpace();
                           }
                       });
                   } catch (Throwable ignored) {}
@@ -200,9 +201,13 @@ jobs:
 
               private void hookScreenSleepPurge(ClassLoader cl) {
                   try {
-                      Class<?> pwmClass = XposedHelpers.findClass("com.android.server.policy.PhoneWindowManager", cl);
+                      Class<?> pwmClass = XposedHelpers.findClass(
+                          "com.android.server.policy.PhoneWindowManager", cl);
+
                       XposedBridge.hookAllMethods(pwmClass, "finishedGoingToSleep", new XC_MethodHook() {
-                          @Override protected void afterHookedMethod(MethodHookParam param) { exitAndPurgePrivateSpace(); }
+                          @Override protected void afterHookedMethod(MethodHookParam param) {
+                              exitAndPurgePrivateSpace();
+                          }
                       });
                   } catch (Throwable ignored) {}
               }
@@ -229,8 +234,9 @@ jobs:
                               XposedHelpers.setBooleanField(mUserController, "mUserSwitchUiEnabled", false);
                               XposedHelpers.callMethod(mUserController, "switchUser", MAIN_USER_ID);
                               new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                                  try { XposedHelpers.callMethod(mUserController, "stopUser", privateUser, true, null, null); }
-                                  catch (Throwable ignored) {}
+                                  try {
+                                      XposedHelpers.callMethod(mUserController, "stopUser", privateUser, true, null, null);
+                                  } catch (Throwable ignored) {}
                               }, 800);
                           }
                       }
@@ -239,8 +245,11 @@ jobs:
 
               private void hookSystemUI(ClassLoader cl) {
                   try {
-                      Class<?> usc = XposedHelpers.findClassIfExists("com.android.systemui.statusbar.policy.UserSwitcherController", cl);
-                      if (usc != null) XposedBridge.hookAllMethods(usc, "showSwitchUserToast", XC_MethodReplacement.DO_NOTHING);
+                      Class<?> usc = XposedHelpers.findClassIfExists(
+                          "com.android.systemui.statusbar.policy.UserSwitcherController", cl);
+                      if (usc != null) {
+                          XposedBridge.hookAllMethods(usc, "showSwitchUserToast", XC_MethodReplacement.DO_NOTHING);
+                      }
                   } catch (Throwable ignored) {}
               }
           }

@@ -310,6 +310,9 @@ jobs:
           }
           EOF
 
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.4
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
@@ -321,3 +324,4 @@ jobs:
         with:
           name: PrivateSpaceVector-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+          

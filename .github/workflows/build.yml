@@ -1,0 +1,324 @@
+name: Build PrivateSpace Vector APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Create Android Project Structure
+        run: |
+          mkdir -p app/src/main/java/com/custom/privatespace/vector
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/assets
+
+      - name: Write AndroidManifest.xml
+        run: |
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.custom.privatespace.vector">
+              <application android:label="PrivateSpace Vector" android:hasCode="true" android:exported="true">
+                  <meta-data android:name="xposedmodule" android:value="true" />
+                  <meta-data android:name="xposeddescription" android:value="Huawei PrivateSpace engine via pure Vector hooks." />
+                  <meta-data android:name="xposedminversion" android:value="93" />
+                  <meta-data android:name="xposedscope" android:resource="@array/xposed_scope" />
+                  <activity android:name=".SettingsActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+      - name: Write arrays.xml
+        run: |
+          cat << 'EOF' > app/src/main/res/values/arrays.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string-array name="xposed_scope">
+                  <item>android</item>
+                  <item>com.android.systemui</item>
+              </string-array>
+          </resources>
+          EOF
+
+      - name: Write xposed_init
+        run: |
+          echo "com.custom.privatespace.vector.PrivateSpaceVectorEngine" > app/src/main/assets/xposed_init
+
+      - name: Write SettingsActivity.java
+        run: |
+          cat << 'EOF' > app/src/main/java/com/custom/privatespace/vector/SettingsActivity.java
+          package com.custom.privatespace.vector;
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.Toast;
+          import android.provider.Settings;
+          import android.widget.LinearLayout;
+
+          public class SettingsActivity extends Activity {
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  EditText input = new EditText(this);
+                  input.setHint("Stealth Fingerprint ID");
+                  int currentFid = Settings.Global.getInt(getContentResolver(), "ps_secret_finger_id", 501100510);
+                  input.setText(String.valueOf(currentFid));
+                  Button saveBtn = new Button(this);
+                  saveBtn.setText("Save Configuration");
+                  saveBtn.setOnClickListener(v -> {
+                      try {
+                          int fid = Integer.parseInt(input.getText().toString().trim());
+                          Settings.Global.putInt(getContentResolver(), "ps_secret_finger_id", fid);
+                          Settings.Global.putInt(getContentResolver(), "ps_private_user_id", 10);
+                          Toast.makeText(this, "Saved! Changes are live.", Toast.LENGTH_SHORT).show();
+                      } catch (Exception e) {
+                          Toast.makeText(this, "Invalid ID", Toast.LENGTH_SHORT).show();
+                      }
+                  });
+                  LinearLayout layout = new LinearLayout(this);
+                  layout.setOrientation(LinearLayout.VERTICAL);
+                  int pad = 48;
+                  layout.setPadding(pad, pad, pad, pad);
+                  layout.addView(input);
+                  layout.addView(saveBtn);
+                  setContentView(layout);
+              }
+          }
+          EOF
+
+      - name: Write PrivateSpaceVectorEngine.java
+        run: |
+          cat << 'EOF' > app/src/main/java/com/custom/privatespace/vector/PrivateSpaceVectorEngine.java
+          package com.custom.privatespace.vector;
+          import android.content.Context;
+          import android.hardware.biometrics.BiometricAuthenticator;
+          import android.provider.Settings;
+          import android.os.Handler;
+          import android.os.Looper;
+          import de.robv.android.xposed.IXposedHookLoadPackage;
+          import de.robv.android.xposed.XC_MethodHook;
+          import de.robv.android.xposed.XC_MethodReplacement;
+          import de.robv.android.xposed.XposedBridge;
+          import de.robv.android.xposed.XposedHelpers;
+          import de.robv.android.xposed.callbacks.XC_LoadPackage;
+
+          public class PrivateSpaceVectorEngine implements IXposedHookLoadPackage {
+              private static final int DEFAULT_SECRET_FINGER_ID = 501100510;
+              private static final int DEFAULT_PRIVATE_USER_ID = 10;
+              private static final int MAIN_USER_ID = 0;
+              private Context mSystemContext;
+              private Object mUserController;
+
+              private Context getSystemContext() {
+                  if (mSystemContext == null) {
+                      try {
+                          Class<?> atClass = Class.forName("android.app.ActivityThread");
+                          Object at = XposedHelpers.callStaticMethod(atClass, "currentActivityThread");
+                          mSystemContext = (Context) XposedHelpers.callMethod(at, "getSystemContext");
+                      } catch (Throwable ignored) {}
+                  }
+                  return mSystemContext;
+              }
+
+              private int getSecretFingerId() {
+                  Context ctx = getSystemContext();
+                  if (ctx != null) return Settings.Global.getInt(ctx.getContentResolver(), "ps_secret_finger_id", DEFAULT_SECRET_FINGER_ID);
+                  return DEFAULT_SECRET_FINGER_ID;
+              }
+
+              private int getPrivateUserId() {
+                  Context ctx = getSystemContext();
+                  if (ctx != null) return Settings.Global.getInt(ctx.getContentResolver(), "ps_private_user_id", DEFAULT_PRIVATE_USER_ID);
+                  return DEFAULT_PRIVATE_USER_ID;
+              }
+
+              @Override
+              public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
+                  if ("android".equals(lpparam.packageName)) {
+                      hookUserController(lpparam.classLoader);
+                      hookBiometricAuthentication(lpparam.classLoader);
+                      hookScreenSleepPurge(lpparam.classLoader);
+                  } else if ("com.android.systemui".equals(lpparam.packageName)) {
+                      hookSystemUI(lpparam.classLoader);
+                  }
+              }
+
+              private void hookUserController(ClassLoader cl) {
+                  try {
+                      Class<?> ucClass = XposedHelpers.findClass("com.android.server.am.UserController", cl);
+                      XposedBridge.hookAllConstructors(ucClass, new XC_MethodHook() {
+                          @Override protected void afterHookedMethod(MethodHookParam param) {
+                              mUserController = param.thisObject;
+                              XposedHelpers.setBooleanField(param.thisObject, "mUserSwitchUiEnabled", false);
+                          }
+                      });
+                      XposedBridge.hookAllMethods(ucClass, "showUserSwitchingDialog", XC_MethodReplacement.DO_NOTHING);
+                      XposedBridge.hookAllMethods(ucClass, "startUserInternal", new XC_MethodHook() {
+                          @Override protected void beforeHookedMethod(MethodHookParam param) {
+                              XposedHelpers.setBooleanField(param.thisObject, "mUserSwitchUiEnabled", false);
+                          }
+                      });
+                  } catch (Throwable ignored) {}
+              }
+
+              private void hookBiometricAuthentication(ClassLoader cl) {
+                  try {
+                      Class<?> authClientClass = XposedHelpers.findClass("com.android.server.biometrics.sensors.AuthenticationClient", cl);
+                      XposedBridge.hookAllMethods(authClientClass, "onAuthenticated", new XC_MethodHook() {
+                          @Override protected void afterHookedMethod(MethodHookParam param) {
+                              boolean authenticated = (boolean) param.args[1];
+                              if (!authenticated || param.args[0] == null) return;
+                              BiometricAuthenticator.Identifier id = (BiometricAuthenticator.Identifier) param.args[0];
+                              if (id.getBiometricId() == getSecretFingerId()) switchToPrivateSpace();
+                          }
+                      });
+                  } catch (Throwable ignored) {}
+              }
+
+              private void hookScreenSleepPurge(ClassLoader cl) {
+                  try {
+                      Class<?> pwmClass = XposedHelpers.findClass("com.android.server.policy.PhoneWindowManager", cl);
+                      XposedBridge.hookAllMethods(pwmClass, "finishedGoingToSleep", new XC_MethodHook() {
+                          @Override protected void afterHookedMethod(MethodHookParam param) { exitAndPurgePrivateSpace(); }
+                      });
+                  } catch (Throwable ignored) {}
+              }
+
+              private void switchToPrivateSpace() {
+                  try {
+                      int targetUser = getPrivateUserId();
+                      if (mUserController != null) {
+                          int currentUser = (int) XposedHelpers.callMethod(mUserController, "getCurrentUserId");
+                          if (currentUser != targetUser) {
+                              XposedHelpers.setBooleanField(mUserController, "mUserSwitchUiEnabled", false);
+                              XposedHelpers.callMethod(mUserController, "switchUser", targetUser);
+                          }
+                      }
+                  } catch (Throwable ignored) {}
+              }
+
+              private void exitAndPurgePrivateSpace() {
+                  try {
+                      int privateUser = getPrivateUserId();
+                      if (mUserController != null) {
+                        int currentUser = (int) XposedHelpers.callMethod(mUserController, "getCurrentUserId");
+                          if (currentUser == privateUser) {
+                              XposedHelpers.setBooleanField(mUserController, "mUserSwitchUiEnabled", false);
+                              XposedHelpers.callMethod(mUserController, "switchUser", MAIN_USER_ID);
+                              new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                  try { XposedHelpers.callMethod(mUserController, "stopUser", privateUser, true, null, null); }
+                                  catch (Throwable ignored) {}
+                              }, 800);
+                          }
+                      }
+                  } catch (Throwable ignored) {}
+              }
+
+              private void hookSystemUI(ClassLoader cl) {
+                  try {
+                      Class<?> usc = XposedHelpers.findClassIfExists("com.android.systemui.statusbar.policy.UserSwitcherController", cl);
+                      if (usc != null) XposedBridge.hookAllMethods(usc, "showSwitchUserToast", XC_MethodReplacement.DO_NOTHING);
+                  } catch (Throwable ignored) {}
+              }
+          }
+          EOF
+
+      - name: Write build.gradle
+        run: |
+          cat << 'EOF' > build.gradle
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.1.1'
+              }
+          }
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven { url 'https://api.xposed.info/' }
+              }
+          }
+          EOF
+
+      - name: Write settings.gradle
+        run: |
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven { url 'https://api.xposed.info/' }
+              }
+          }
+          rootmatch = "PrivateSpaceVector"
+          include ':app'
+          EOF
+
+      - name: Write app/build.gradle
+        run: |
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.custom.privatespace.vector'
+              compileSdk 33
+              defaultConfig {
+                  applicationId "com.custom.privatespace.vector"
+                  minSdk 29
+                  targetSdk 33
+                  versionCode 1
+                  versionName "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_11
+                  targetCompatibility JavaVersion.VERSION_11
+              }
+          }
+          dependencies {
+              compileOnly 'de.robv.android.xposed:api:82'
+          }
+          EOF
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrivateSpaceVector-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          

@@ -70,34 +70,56 @@ jobs:
         run: |
           cat << 'EOF' > app/src/main/java/com/custom/privatespace/vector/SettingsActivity.java
           package com.custom.privatespace.vector;
+
           import android.app.Activity;
           import android.os.Bundle;
           import android.widget.Button;
           import android.widget.EditText;
           import android.widget.Toast;
-          import android.provider.Settings;
           import android.widget.LinearLayout;
 
           public class SettingsActivity extends Activity {
               @Override
               protected void onCreate(Bundle savedInstanceState) {
                   super.onCreate(savedInstanceState);
+                  
                   EditText input = new EditText(this);
-                  input.setHint("Stealth Fingerprint ID");
-                  int currentFid = Settings.Global.getInt(getContentResolver(), "ps_secret_finger_id", 501100510);
-                  input.setText(String.valueOf(currentFid));
+                  input.setHint("Stealth Fingerprint ID (e.g. 501100510)");
+                  
+                  try {
+                      Process process = Runtime.getRuntime().exec(new String[]{"su", "-c", "settings get global ps_secret_finger_id"});
+                      java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()));
+                      String current = reader.readLine();
+                      if (current != null && !current.equals("null") && !current.isEmpty()) {
+                          input.setText(current.trim());
+                      } else {
+                          input.setText("501100510");
+                      }
+                  } catch (Exception e) {
+                      input.setText("501100510");
+                  }
+
                   Button saveBtn = new Button(this);
                   saveBtn.setText("Save Configuration");
                   saveBtn.setOnClickListener(v -> {
                       try {
-                          int fid = Integer.parseInt(input.getText().toString().trim());
-                          Settings.Global.putInt(getContentResolver(), "ps_secret_finger_id", fid);
-                          Settings.Global.putInt(getContentResolver(), "ps_private_user_id", 10);
-                          Toast.makeText(this, "Saved! Changes are live.", Toast.LENGTH_SHORT).show();
+                          String textVal = input.getText().toString().trim();
+                          int fid = Integer.parseInt(textVal);
+
+                          Process p = Runtime.getRuntime().exec(new String[]{
+                              "su", "-c", 
+                              "settings put global ps_secret_finger_id " + fid + " && settings put global ps_private_user_id 10"
+                          });
+                          p.waitFor();
+
+                          Toast.makeText(this, "Saved successfully! ID: " + fid, Toast.LENGTH_SHORT).show();
+                      } catch (NumberFormatException nfe) {
+                          Toast.makeText(this, "Error: Please enter a valid number", Toast.LENGTH_LONG).show();
                       } catch (Exception e) {
-                          Toast.makeText(this, "Invalid ID", Toast.LENGTH_SHORT).show();
+                          Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
                       }
                   });
+
                   LinearLayout layout = new LinearLayout(this);
                   layout.setOrientation(LinearLayout.VERTICAL);
                   int pad = 48;
@@ -191,7 +213,7 @@ jobs:
                           @Override protected void afterHookedMethod(MethodHookParam param) {
                               boolean authenticated = (boolean) param.args[1];
                               if (!authenticated || param.args[0] == null) return;
-                              Object id = param.args[0]; // avoid hidden type entirely via reflection
+                              Object id = param.args[0];
                               int biometricId = (int) XposedHelpers.callMethod(id, "getBiometricId");
                               if (biometricId == getSecretFingerId()) switchToPrivateSpace();
                           }

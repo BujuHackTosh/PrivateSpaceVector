@@ -18,6 +18,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Setup Gradle 8.4
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.4'
+
       - name: Create Android Project Structure
         run: |
           mkdir -p app/src/main/java/com/custom/privatespace/vector
@@ -244,8 +249,14 @@ jobs:
       - name: Write build.gradle
         run: |
           cat << 'EOF' > build.gradle
-          plugins {
-              id 'com.android.application' version '8.1.1' apply false
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.1.1'
+              }
           }
           EOF
 
@@ -299,9 +310,6 @@ jobs:
 
       - name: Generate Gradle Wrapper
         run: gradle wrapper --gradle-version 8.4
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug
